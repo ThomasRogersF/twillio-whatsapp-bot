@@ -17,11 +17,11 @@ MIN_WEEKLY_HOURS = "15"
 
 # Your Twilio WhatsApp sender number in E.164 format, prefixed with "whatsapp:".
 # Must match the number registered in your Twilio Sandbox or approved sender.
-TWILIO_WHATSAPP_FROM = "whatsapp:+57xxxxxxxxxx"
+TWILIO_WHATSAPP_FROM = "whatsapp:+573052871891"
 
 # Link sent to candidates who PASS screening (e.g. a wa.me deep-link to Maria).
 # Example: "https://wa.me/57xxxxxxxxxx?text=Hi%20Maria%2C%20I%20passed%20screening!"
-MARIA_WA_ME_LINK = "https://wa.me/57xxxxxxxxxx?text=Hi%20Maria..."
+MARIA_WA_ME_LINK = "https://wa.me/584249075130?text=Hi%20Maria%2C%20I%20passed%20screening%20and%20would%20like%20to%20schedule%20my%20interview."
 
 # ─── Secrets ──────────────────────────────────────────────────────────────────
 # The following values must be set as Cloudflare Worker secrets (never committed
