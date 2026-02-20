@@ -13,14 +13,15 @@ export interface Env {
   MIN_WEEKLY_HOURS?: string;
 }
 
-type ScreeningStep = "Q1" | "Q2" | "Q3" | "Q4" | "Q5";
+type ScreeningStep = "INTRO" | "Q1" | "Q2" | "Q3" | "Q4" | "Q5" | "Q6";
 
 interface Answers {
-  q1_team_role?: string;
-  q2_availability?: string;
-  q3_start_date?: string;
-  q4_setup?: string;
-  q5_curriculum?: string;
+  team_role?: "yes" | "no";
+  weekly_availability?: "full_time" | "part_time" | "low";
+  start_date?: "now" | "soon" | "later";
+  setup?: "yes" | "no";
+  sop?: "yes" | "no";
+  english_level?: "good" | "ok" | "low";
 }
 
 interface SessionState {
@@ -28,6 +29,7 @@ interface SessionState {
   answers: Answers;
   startedAt: string;
   lastActivityAt: string;
+  completed?: boolean;
 }
 
 interface RateLimitRecord {
@@ -49,15 +51,25 @@ const RATE_LIMIT_WINDOW_MS = 10_000;   // 10 seconds
 const RATE_LIMIT_MAX = 5;
 const RATE_LIMIT_KV_TTL = 60;          // 60 seconds (KV minimum)
 
-// Plain-text question messages. Each message lists all accepted typed/numeric
-// replies so the flow works regardless of whether WhatsApp delivers buttons.
 const QUESTION_TEXT: Record<ScreeningStep, string> = {
-  Q1: "Q1/5: Are you looking for a TEAM role (not marketplace/freelance like italki or Preply)?\nReply YES or NO  (or 1 / 2)",
-  Q2: "Q2/5: What is your weekly availability?\n1 - FULLTIME (30+ hrs/wk)\n2 - PARTTIME (15-29 hrs/wk)\n3 - LOW (less than 15 hrs/wk)\nReply FULLTIME, PARTTIME, LOW, or 1 / 2 / 3",
-  Q3: "Q3/5: When can you start?\n1 - NOW (immediately)\n2 - 2WEEKS (1-2 weeks)\n3 - 1MONTH (1 month+)\nReply NOW, 2WEEKS, 1MONTH, or 1 / 2 / 3",
-  Q4: "Q4/5: Do you have a stable internet connection and a quiet teaching setup?\nReply YES or NO  (or 1 / 2)",
-  Q5: "Q5/5: Are you willing to follow a set curriculum and SOPs?\nReply YES or NO  (or 1 / 2)",
+  INTRO: "👋 ¡Hola! Gracias por postularte para ser *Profesor/a de Español* en *SpanishVIP* 🇪🇸✨\n\n🕒 Esto es un *pre-filtro rápido (2 minutos)* para confirmar algunos requisitos básicos.\n\n✅ Para responder, escribe el *número* de la opción (por ejemplo: *1*) o la palabra clave indicada.\n\n💡 _Tip:_ Responde con calma, un mensaje por pregunta 😊\n\n¿List@? Responde:\n1) Empezar 🚀\n2) Salir ❌",
+  Q1: "*Q1/6* 🧩\nEn SpanishVIP buscamos un rol de *equipo* (no estilo marketplace como italki/Preply).\n\n¿Buscas un rol fijo y comprometido con el equipo?\n1) ✅ Sí, quiero ser parte del equipo\n2) ❌ No, solo freelance / marketplace",
+  Q2: "*Q2/6* 🗓️\n¿Cuántas horas por semana puedes comprometerte de forma constante?\n1) 💪 Tiempo completo (30+ hrs/sem)\n2) 🙂 Medio tiempo (15–29 hrs/sem)\n3) 🥲 Menos de 15 hrs/sem\n\nTambién puedes escribir: FT / PT / LOW",
+  Q3: "*Q3/6* ⏱️\n¿Cuándo podrías empezar?\n1) 🚀 Inmediatamente\n2) 📆 En 1–2 semanas\n3) 🗓️ En 1 mes o más\n\nTambién puedes escribir: NOW / 2WEEKS / 1MONTH",
+  Q4: "*Q4/6* 💻🎧\n¿Tienes internet estable + un lugar tranquilo para enseñar?\n1) ✅ Sí\n2) ❌ No",
+  Q5: "*Q5/6* 📚✨\n¿Estás de acuerdo en seguir el currículum y los SOPs del equipo?\n1) ✅ Sí, claro\n2) ❌ No",
+  Q6: "*Q6/6* 🇺🇸🗣️\nPara coordinarnos mejor en el equipo, necesitamos un nivel mínimo de inglés.\n\n¿Cuál es tu nivel de inglés?\n1) ✅ Bueno (puedo conversar con confianza)\n2) 🙂 Me defiendo (puedo comunicarme lo básico)\n3) ❌ No sé mucho",
 };
+
+const FAIL_MESSAGES = {
+  Q1: "💛 Gracias por tu sinceridad.\nEn este momento estamos buscando *miembros de equipo* con compromiso y disponibilidad constante.\n\n🙏 Te deseamos lo mejor y gracias por postularte.",
+  Q2: "💛 ¡Gracias!\nPor ahora necesitamos mínimo *15 horas/semana* de disponibilidad constante.\n\n🙏 Te agradecemos tu tiempo y tu interés en SpanishVIP.",
+  Q4: "💛 Gracias por tu respuesta.\nPara poder dar clases con calidad, necesitamos *internet estable* y un *espacio tranquilo*.\n\n🙏 Te agradecemos tu tiempo.",
+  Q5: "💛 Gracias por tu sinceridad.\nPara este rol es importante seguir nuestro sistema y procesos.\n\n🙏 Te deseamos lo mejor y gracias por postularte.",
+  Q6: "💛 ¡Gracias!\nPor ahora necesitamos al menos un nivel de inglés para comunicarnos en el equipo (aunque sea _“me defiendo”_).\n\n🙏 Te agradecemos tu tiempo y tu interés en SpanishVIP.",
+};
+
+const INVALID_INPUT_MESSAGE = "😊 ¡Casi!\nPor favor responde con el *número* de una opción (por ejemplo: *1*) o con la palabra clave.\n\n✨ Si quieres reiniciar, escribe: *RESTART*\n🚀 Para empezar desde cero, escribe: *START*";
 
 // ─── Text Sanitization ────────────────────────────────────────────────────────
 
@@ -108,7 +120,7 @@ async function safeKvDelete(kv: KVNamespace, key: string): Promise<void> {
 
 function createSession(): SessionState {
   const now = new Date().toISOString();
-  return { step: "Q1", answers: {}, startedAt: now, lastActivityAt: now };
+  return { step: "INTRO", answers: {}, startedAt: now, lastActivityAt: now };
 }
 
 async function loadSession(
@@ -145,12 +157,12 @@ async function checkRateLimit(from: string, env: Env): Promise<boolean> {
   const raw = await safeKvGet(env.BOT_KV, key);
   const record: RateLimitRecord = raw
     ? (() => {
-        try {
-          return JSON.parse(raw) as RateLimitRecord;
-        } catch {
-          return { timestamps: [] };
-        }
-      })()
+      try {
+        return JSON.parse(raw) as RateLimitRecord;
+      } catch {
+        return { timestamps: [] };
+      }
+    })()
     : { timestamps: [] };
 
   record.timestamps = record.timestamps.filter((ts) => ts > windowStart);
@@ -249,6 +261,7 @@ async function passSession(
   session: SessionState,
   env: Env
 ): Promise<void> {
+  session.completed = true;
   const payload: ResultPayload = {
     whatsapp_from: from,
     result: "pass",
@@ -258,24 +271,24 @@ async function passSession(
   };
 
   await Promise.all([
-    safeKvDelete(env.BOT_KV, `session:${from}`),
+    saveSession(from, session, env), // Keep session marked as completed
     postResultWebhook(payload, env),
   ]);
 
-  const link = env.MARIA_WA_ME_LINK ?? "Please await further instructions.";
-  await sendTwilioText(
-    from,
-    `You passed screening! Next step: ${link}`,
-    env
-  );
+  const link = env.MARIA_WA_ME_LINK ?? "https://wa.me/57xxxxxxxxxx";
+  const passMsg = `🎉 *¡Excelente! Has pasado el pre-filtro* ✅\n\n🧑💼 Siguiente paso: hablar con una persona del equipo para coordinar tu *primera entrevista*.\n\n👉 Escribe aquí a *Maria Camila* para continuar:\n${link}\n\n💬 _Por favor envía este mensaje cuando le escribas:_\n“Hola Maria, pasé el pre-filtro de SpanishVIP. Mi nombre es ___ y mi correo es ___.”\n\n💛 ¡Gracias y nos vemos pronto!`;
+
+  await sendTwilioText(from, passMsg, env);
 }
 
 async function failSession(
   from: string,
   session: SessionState,
+  stepKey: keyof typeof FAIL_MESSAGES,
   reason: string,
   env: Env
 ): Promise<void> {
+  session.completed = true;
   const payload: ResultPayload = {
     whatsapp_from: from,
     result: "fail",
@@ -285,23 +298,18 @@ async function failSession(
   };
 
   await Promise.all([
-    safeKvDelete(env.BOT_KV, `session:${from}`),
+    saveSession(from, session, env), // Keep session marked as completed
     postResultWebhook(payload, env),
   ]);
 
-  await sendTwilioText(
-    from,
-    `Thanks for your time - not the best fit right now. Reason: ${reason}`,
-    env
-  );
+  const failMsg = FAIL_MESSAGES[stepKey];
+  await sendTwilioText(from, failMsg, env);
 }
 
-// Normalises the input to match known button payload IDs and text fallbacks.
-// Returns a canonical string (payload ID or lowercase trimmed input) for switch matching.
+// Normalises the input to match known keywords and numeric options.
+// Returns a trimmed, uppercase string.
 function resolveInput(raw: string): string {
-  // Already a known payload ID pattern (e.g. Q1_YES) — return as-is
-  if (/^Q[1-5]_[A-Z0-9]+$/.test(raw)) return raw;
-  return raw.toLowerCase();
+  return raw.trim().toUpperCase();
 }
 
 async function handleStep(
@@ -320,149 +328,152 @@ async function handleStep(
   );
 
   switch (session.step) {
+    case "INTRO": {
+      if (input === "1" || input === "EMPEZAR" || input === "EMPEZAR 🚀") {
+        session.step = "Q1";
+        await saveSession(from, session, env);
+        await sendTwilioText(from, QUESTION_TEXT["Q1"], env);
+      } else if (input === "2" || input === "SALIR" || input === "SALIR ❌") {
+        await safeKvDelete(env.BOT_KV, `session:${from}`);
+        await sendTwilioText(from, "Entendido. Si quieres empezar más tarde, simplemente escribe *START*.", env);
+      } else {
+        await sendTwilioText(from, INVALID_INPUT_MESSAGE, env);
+      }
+      return;
+    }
+
     case "Q1": {
-      // Accept: Q1_YES | yes | y | 1  /  Q1_NO | no | n | 2
-      if (input === "Q1_YES" || input === "yes" || input === "y" || input === "1") {
-        session.answers.q1_team_role = "yes";
+      const isYes = ["1", "YES", "SI", "SÍ", "Y"].includes(input);
+      const isNo = ["2", "NO", "N"].includes(input);
+
+      if (isYes) {
+        session.answers.team_role = "yes";
         session.step = "Q2";
-        console.log(`[handleStep] from=${from} step.after=${session.step}`);
         await saveSession(from, session, env);
         await sendTwilioText(from, QUESTION_TEXT["Q2"], env);
-      } else if (input === "Q1_NO" || input === "no" || input === "n" || input === "2") {
-        session.answers.q1_team_role = "no";
-        await failSession(from, session, "Looking for marketplace/freelance work", env);
+      } else if (isNo) {
+        session.answers.team_role = "no";
+        await failSession(from, session, "Q1", "not team role", env);
       } else {
-        console.log(`[handleStep] from=${from} step=${stepBefore} unrecognised input — re-prompting`);
-        await sendTwilioText(from, QUESTION_TEXT["Q1"], env);
+        await sendTwilioText(from, INVALID_INPUT_MESSAGE, env);
       }
       return;
     }
 
     case "Q2": {
-      // Accept: Q2_FT | fulltime | ft | 1 | starts-with "full"
-      //         Q2_PT | parttime | pt | 2 | starts-with "part"
-      //         Q2_LOW | low | <15 | 3 | starts-with "less"
-      if (
-        input === "Q2_FT" ||
-        input === "fulltime" ||
-        input === "ft" ||
-        input === "1" ||
-        input.startsWith("full")
-      ) {
-        session.answers.q2_availability = "full_time";
+      const isFT = ["1", "FT", "FULLTIME", "FULL-TIME"].includes(input);
+      const isPT = ["2", "PT", "PARTTIME", "PART-TIME"].includes(input);
+      const isLow = ["3", "LOW", "<15", "LESS", "MENOS"].includes(input);
+
+      if (isFT) {
+        session.answers.weekly_availability = "full_time";
         session.step = "Q3";
-        console.log(`[handleStep] from=${from} step.after=${session.step}`);
         await saveSession(from, session, env);
         await sendTwilioText(from, QUESTION_TEXT["Q3"], env);
-      } else if (
-        input === "Q2_PT" ||
-        input === "parttime" ||
-        input === "pt" ||
-        input === "2" ||
-        input.startsWith("part")
-      ) {
-        session.answers.q2_availability = "part_time";
-        if (minHours >= 30) {
-          await failSession(from, session, "Insufficient weekly hours", env);
+      } else if (isPT) {
+        session.answers.weekly_availability = "part_time";
+        // If MIN_WEEKLY_HOURS is 30 or more, PT (15-29) fails.
+        if (minHours > 29) {
+          await failSession(from, session, "Q2", "low", env);
         } else {
           session.step = "Q3";
-          console.log(`[handleStep] from=${from} step.after=${session.step}`);
           await saveSession(from, session, env);
           await sendTwilioText(from, QUESTION_TEXT["Q3"], env);
         }
-      } else if (
-        input === "Q2_LOW" ||
-        input === "low" ||
-        input === "<15" ||
-        input === "3" ||
-        input.startsWith("less")
-      ) {
-        session.answers.q2_availability = "low";
-        await failSession(from, session, "Insufficient weekly hours", env);
+      } else if (isLow) {
+        session.answers.weekly_availability = "low";
+        // Threshold check: "low" is < 15. If minHours is 1 or more, "low" fails.
+        if (minHours >= 1) {
+          await failSession(from, session, "Q2", "low", env);
+        } else {
+          session.step = "Q3";
+          await saveSession(from, session, env);
+          await sendTwilioText(from, QUESTION_TEXT["Q3"], env);
+        }
       } else {
-        console.log(`[handleStep] from=${from} step=${stepBefore} unrecognised input — re-prompting`);
-        await sendTwilioText(from, QUESTION_TEXT["Q2"], env);
+        await sendTwilioText(from, INVALID_INPUT_MESSAGE, env);
       }
       return;
     }
 
     case "Q3": {
-      // Accept: Q3_NOW | now | immediately | starts-with "imm" | 1
-      //         Q3_2W  | 2weeks | soon | starts-with "1-2" | starts-with "1–2" | 2
-      //         Q3_1M  | 1month | later | starts-with "1 month" | 3
-      if (
-        input === "Q3_NOW" ||
-        input === "now" ||
-        input === "immediately" ||
-        input === "1" ||
-        input.startsWith("imm")
-      ) {
-        session.answers.q3_start_date = "immediately";
+      const isNow = ["1", "NOW", "INMEDIATO", "INMEDIATAMENTE"].includes(input);
+      const isSoon = ["2", "2WEEKS", "SOON", "PRONTO", "1-2"].includes(input);
+      const isLater = ["3", "1MONTH", "LATER", "MAS", "MÁS", "1 MES"].includes(input);
+
+      if (isNow) {
+        session.answers.start_date = "now";
         session.step = "Q4";
-        console.log(`[handleStep] from=${from} step.after=${session.step}`);
         await saveSession(from, session, env);
         await sendTwilioText(from, QUESTION_TEXT["Q4"], env);
-      } else if (
-        input === "Q3_2W" ||
-        input === "2weeks" ||
-        input === "soon" ||
-        input === "2" ||
-        input.startsWith("1\u20132") ||
-        input.startsWith("1-2")
-      ) {
-        session.answers.q3_start_date = "1_2_weeks";
+      } else if (isSoon) {
+        session.answers.start_date = "soon";
         session.step = "Q4";
-        console.log(`[handleStep] from=${from} step.after=${session.step}`);
         await saveSession(from, session, env);
         await sendTwilioText(from, QUESTION_TEXT["Q4"], env);
-      } else if (
-        input === "Q3_1M" ||
-        input === "1month" ||
-        input === "later" ||
-        input === "3" ||
-        input.startsWith("1 month")
-      ) {
-        session.answers.q3_start_date = "1_month_plus";
+      } else if (isLater) {
+        session.answers.start_date = "later";
         session.step = "Q4";
-        console.log(`[handleStep] from=${from} step.after=${session.step}`);
         await saveSession(from, session, env);
         await sendTwilioText(from, QUESTION_TEXT["Q4"], env);
       } else {
-        console.log(`[handleStep] from=${from} step=${stepBefore} unrecognised input — re-prompting`);
-        await sendTwilioText(from, QUESTION_TEXT["Q3"], env);
+        await sendTwilioText(from, INVALID_INPUT_MESSAGE, env);
       }
       return;
     }
 
     case "Q4": {
-      // Accept: Q4_YES | yes | y | 1  /  Q4_NO | no | n | 2
-      if (input === "Q4_YES" || input === "yes" || input === "y" || input === "1") {
-        session.answers.q4_setup = "yes";
+      const isYes = ["1", "YES", "SI", "SÍ"].includes(input);
+      const isNo = ["2", "NO"].includes(input);
+
+      if (isYes) {
+        session.answers.setup = "yes";
         session.step = "Q5";
-        console.log(`[handleStep] from=${from} step.after=${session.step}`);
         await saveSession(from, session, env);
         await sendTwilioText(from, QUESTION_TEXT["Q5"], env);
-      } else if (input === "Q4_NO" || input === "no" || input === "n" || input === "2") {
-        session.answers.q4_setup = "no";
-        await failSession(from, session, "No suitable teaching setup", env);
+      } else if (isNo) {
+        session.answers.setup = "no";
+        await failSession(from, session, "Q4", "no stable setup", env);
       } else {
-        console.log(`[handleStep] from=${from} step=${stepBefore} unrecognised input — re-prompting`);
-        await sendTwilioText(from, QUESTION_TEXT["Q4"], env);
+        await sendTwilioText(from, INVALID_INPUT_MESSAGE, env);
       }
       return;
     }
 
     case "Q5": {
-      // Accept: Q5_YES | yes | y | 1  /  Q5_NO | no | n | 2
-      if (input === "Q5_YES" || input === "yes" || input === "y" || input === "1") {
-        session.answers.q5_curriculum = "yes";
-        await passSession(from, session, env);
-      } else if (input === "Q5_NO" || input === "no" || input === "n" || input === "2") {
-        session.answers.q5_curriculum = "no";
-        await failSession(from, session, "Unwilling to follow curriculum", env);
+      const isYes = ["1", "YES", "SI", "SÍ"].includes(input);
+      const isNo = ["2", "NO"].includes(input);
+
+      if (isYes) {
+        session.answers.sop = "yes";
+        session.step = "Q6";
+        await saveSession(from, session, env);
+        await sendTwilioText(from, QUESTION_TEXT["Q6"], env);
+      } else if (isNo) {
+        session.answers.sop = "no";
+        await failSession(from, session, "Q5", "not willing to follow SOP", env);
       } else {
-        console.log(`[handleStep] from=${from} step=${stepBefore} unrecognised input — re-prompting`);
-        await sendTwilioText(from, QUESTION_TEXT["Q5"], env);
+        await sendTwilioText(from, INVALID_INPUT_MESSAGE, env);
+      }
+      return;
+    }
+
+    case "Q6": {
+      const isGood = ["1", "GOOD", "BUENO", "B1", "B2", "C1", "C2"].includes(input);
+      const isOk = ["2", "DEFENDERME", "ME DEFIENDO", "BASIC", "BASICO", "BÁSICO"].includes(input);
+      const isLow = ["3", "POCO", "NO MUCHO", "NO SE", "NO", "NADA"].includes(input);
+
+      if (isGood) {
+        session.answers.english_level = "good";
+        await passSession(from, session, env);
+      } else if (isOk) {
+        session.answers.english_level = "ok";
+        await passSession(from, session, env);
+      } else if (isLow) {
+        session.answers.english_level = "low";
+        await failSession(from, session, "Q6", "english_low", env);
+      } else {
+        await sendTwilioText(from, INVALID_INPUT_MESSAGE, env);
       }
       return;
     }
@@ -485,7 +496,7 @@ async function processAndSend(
     if (!allowed) {
       await sendTwilioText(
         from,
-        "You're sending messages too quickly. Please wait a moment and try again.",
+        "Estás enviando mensajes demasiado rápido. Por favor, espera un momento.",
         env
       );
       return;
@@ -496,8 +507,8 @@ async function processAndSend(
     const inputSource: "payload" | "buttonText" | "body" = buttonPayload
       ? "payload"
       : buttonText
-      ? "buttonText"
-      : "body";
+        ? "buttonText"
+        : "body";
     const input = (buttonPayload || buttonText || rawBody).trim();
     const upper = input.toUpperCase();
 
@@ -505,25 +516,14 @@ async function processAndSend(
       `[processAndSend] from=${from} inputSource=${inputSource} rawInput="${input}"`
     );
 
-    // PING debug command — sends plain "pong" and logs the result
-    if (upper === "PING") {
-      console.log(`[PING] from=${from}`);
-      await sendTwilioText(from, "pong", env);
-      return;
-    }
-
-    // START and RESTART both clear the session and begin at Q1.
-    // Handling them before loadSession ensures START always resets even when
-    // a session is already in progress (fixes mid-flow resume bug).
+    // START and RESTART both clear the session and begin at INTRO.
     if (upper === "START" || upper === "RESTART") {
       console.log(`[processAndSend] from=${from} command=${upper} — resetting session`);
       await safeKvDelete(env.BOT_KV, `session:${from}`);
       const newSession = createSession();
       await saveSession(from, newSession, env);
-      if (upper === "RESTART") {
-        await sendTwilioText(from, "Session restarted.", env);
-      }
-      await sendTwilioText(from, QUESTION_TEXT["Q1"], env);
+
+      await sendTwilioText(from, QUESTION_TEXT["INTRO"], env);
       return;
     }
 
@@ -533,9 +533,15 @@ async function processAndSend(
     if (!session) {
       await sendTwilioText(
         from,
-        "Hi! Reply START to begin the 2-minute screening.",
+        "👋 ¡Hola! Para comenzar el proceso de pre-filtro para SpanishVIP, por favor escribe *START* 🚀",
         env
       );
+      return;
+    }
+
+    // If session is already completed, ignore further input unless it's START/RESTART
+    if (session.completed) {
+      console.log(`[processAndSend] from=${from} session is completed — ignoring input`);
       return;
     }
 
@@ -545,7 +551,7 @@ async function processAndSend(
     try {
       await sendTwilioText(
         from,
-        "Something went wrong on our end. Reply RESTART to begin again.",
+        "Lo sentimos, algo salió mal. Por favor, escribe *RESTART* para empezar de nuevo.",
         env
       );
     } catch {
