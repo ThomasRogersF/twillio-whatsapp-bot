@@ -58,43 +58,66 @@ const QUESTION_CONTENT: Record<
   { body: string; actions: { title: string; id: string }[] }
 > = {
   Q1: {
-    body: "Q1/5 \u2014 Are you looking for a TEAM role (not marketplace/freelance like italki or Preply)?",
+    body: "Q1/5 - Are you looking for a TEAM role (not marketplace/freelance like italki or Preply)?",
     actions: [
       { title: "Yes", id: "Q1_YES" },
       { title: "No", id: "Q1_NO" },
     ],
   },
   Q2: {
-    body: "Q2/5 \u2014 What is your weekly availability?",
+    body: "Q2/5 - What is your weekly availability?",
     actions: [
       { title: "Full-time (30+ hrs/wk)", id: "Q2_FT" },
-      { title: "Part-time (15\u201329 hrs/wk)", id: "Q2_PT" },
+      { title: "Part-time (15-29 hrs/wk)", id: "Q2_PT" },
       { title: "Less than 15 hrs/wk", id: "Q2_LOW" },
     ],
   },
   Q3: {
-    body: "Q3/5 \u2014 When can you start?",
+    body: "Q3/5 - When can you start?",
     actions: [
       { title: "Immediately", id: "Q3_NOW" },
-      { title: "1\u20132 weeks", id: "Q3_2W" },
+      { title: "1-2 weeks", id: "Q3_2W" },
       { title: "1 month+", id: "Q3_1M" },
     ],
   },
   Q4: {
-    body: "Q4/5 \u2014 Do you have a stable internet connection and a quiet teaching setup?",
+    body: "Q4/5 - Do you have a stable internet connection and a quiet teaching setup?",
     actions: [
       { title: "Yes", id: "Q4_YES" },
       { title: "No", id: "Q4_NO" },
     ],
   },
   Q5: {
-    body: "Q5/5 \u2014 Are you willing to follow a set curriculum and SOPs?",
+    body: "Q5/5 - Are you willing to follow a set curriculum and SOPs?",
     actions: [
       { title: "Yes", id: "Q5_YES" },
       { title: "No", id: "Q5_NO" },
     ],
   },
 };
+
+// Plain-text fallback messages sent when the ContentSid quick-reply fails.
+// Keywords listed here are also recognised as valid typed inputs in handleStep.
+const QUESTION_FALLBACK: Record<ScreeningStep, string> = {
+  Q1: "Q1/5: Looking for a TEAM role (not marketplace/freelance)? Reply YES or NO",
+  Q2: "Q2/5: Weekly availability? Reply FULLTIME, PARTTIME, or LOW",
+  Q3: "Q3/5: When can you start? Reply NOW, 2WEEKS, or 1MONTH",
+  Q4: "Q4/5: Stable internet and quiet teaching setup? Reply YES or NO",
+  Q5: "Q5/5: Willing to follow a set curriculum and SOPs? Reply YES or NO",
+};
+
+// ─── Text Sanitization ────────────────────────────────────────────────────────
+
+// Replaces Unicode characters that can cause Twilio 63013 rendering failures:
+//   em dash (U+2014) → hyphen
+//   curly single quotes (U+2018/U+2019) → straight apostrophe
+//   curly double quotes (U+201C/U+201D) → straight double quote
+function sanitize(text: string): string {
+  return text
+    .replace(/\u2014/g, "-")
+    .replace(/[\u2018\u2019]/g, "'")
+    .replace(/[\u201C\u201D]/g, '"');
+}
 
 // ─── KV Helpers ───────────────────────────────────────────────────────────────
 
@@ -221,8 +244,8 @@ async function createContentTemplate(
     language,
     types: {
       "twilio/quick-reply": {
-        body: q.body,
-        actions: q.actions,
+        body: sanitize(q.body),
+        actions: q.actions.map((a) => ({ ...a, title: sanitize(a.title) })),
       },
     },
   });
@@ -271,17 +294,24 @@ async function getOrCreateContentSid(
 }
 
 // Sends a plain text WhatsApp message via the Twilio Messages REST API.
+// Text is sanitized before sending to avoid 63013 rendering failures.
+// Returns true on success, false on failure.
 async function sendTwilioText(
   to: string,
   body: string,
   env: Env
-): Promise<void> {
+): Promise<boolean> {
+  const sanitized = sanitize(body);
   const url = `https://api.twilio.com/2010-04-01/Accounts/${env.TWILIO_ACCOUNT_SID}/Messages.json`;
   const params = new URLSearchParams({
     To: to,
     From: env.TWILIO_WHATSAPP_FROM,
-    Body: body,
+    Body: sanitized,
   });
+
+  console.log(
+    `[sendTwilioText] to=${to} from=${env.TWILIO_WHATSAPP_FROM} type=plain`
+  );
 
   const res = await fetch(url, {
     method: "POST",
@@ -292,23 +322,27 @@ async function sendTwilioText(
     body: params.toString(),
   });
 
-  if (!res.ok) {
+  if (res.ok) {
+    const data = (await res.json()) as { sid: string };
+    console.log(`[sendTwilioText] success MessageSid=${data.sid}`);
+    return true;
+  } else {
     const text = await res.text().catch(() => "");
-    console.error(`Messages API error ${res.status} sending text: ${text}`);
+    console.error(`[sendTwilioText] error status=${res.status} body=${text}`);
+    return false;
   }
 }
 
 // Sends a WhatsApp message using a Twilio Content template (quick-reply buttons).
-// Separated from getOrCreateContentSid so that obtaining the SID and sending are
-// two distinct, always-executed steps with full observability on both.
+// Returns true on success, false on failure (caller may then send a plain fallback).
 async function sendMessageWithContent(
   to: string,
   step: ScreeningStep,
   contentSid: string,
   env: Env
-): Promise<void> {
+): Promise<boolean> {
   console.log(
-    `[sendMessageWithContent] step=${step} contentSid=${contentSid} to=${to} from=${env.TWILIO_WHATSAPP_FROM}`
+    `[sendMessageWithContent] step=${step} type=content contentSid=${contentSid} to=${to} from=${env.TWILIO_WHATSAPP_FROM}`
   );
 
   const url = `https://api.twilio.com/2010-04-01/Accounts/${env.TWILIO_ACCOUNT_SID}/Messages.json`;
@@ -332,23 +366,32 @@ async function sendMessageWithContent(
     console.log(
       `[sendMessageWithContent] step=${step} success MessageSid=${data.sid}`
     );
+    return true;
   } else {
     const text = await res.text().catch(() => "");
     console.error(
       `[sendMessageWithContent] step=${step} error status=${res.status} body=${text}`
     );
+    return false;
   }
 }
 
-// Sends a question with quick-reply buttons via the Twilio Messages REST API.
-// Always executes both steps: obtain ContentSid, then send — even on first creation.
+// Sends a question with quick-reply buttons.
+// On non-2xx from the Messages API, immediately falls back to a plain-text
+// message with typed-option instructions so the flow is never silently broken.
 async function sendQuestion(
   to: string,
   step: ScreeningStep,
   env: Env
 ): Promise<void> {
   const contentSid = await getOrCreateContentSid(step, env);
-  await sendMessageWithContent(to, step, contentSid, env);
+  const ok = await sendMessageWithContent(to, step, contentSid, env);
+  if (!ok) {
+    console.warn(
+      `[sendQuestion] step=${step} content send failed — sending plain-text fallback to=${to}`
+    );
+    await sendTwilioText(to, QUESTION_FALLBACK[step], env);
+  }
 }
 
 // ─── Result Webhook ───────────────────────────────────────────────────────────
@@ -392,7 +435,7 @@ async function passSession(
   const link = env.MARIA_WA_ME_LINK ?? "Please await further instructions.";
   await sendTwilioText(
     from,
-    `\u2705 You passed screening! Next step: ${link}`,
+    `You passed screening! Next step: ${link}`,
     env
   );
 }
@@ -418,7 +461,7 @@ async function failSession(
 
   await sendTwilioText(
     from,
-    `Thanks for your time \u2014 not the best fit right now. Reason: ${reason}`,
+    `Thanks for your time - not the best fit right now. Reason: ${reason}`,
     env
   );
 }
@@ -458,12 +501,22 @@ async function handleStep(
     }
 
     case "Q2": {
-      if (input === "Q2_FT" || input.startsWith("full") || input === "1") {
+      if (
+        input === "Q2_FT" ||
+        input.startsWith("full") ||
+        input === "1" ||
+        input === "fulltime"
+      ) {
         session.answers.q2_availability = "full_time";
         session.step = "Q3";
         await saveSession(from, session, env);
         await sendQuestion(from, "Q3", env);
-      } else if (input === "Q2_PT" || input.startsWith("part") || input === "2") {
+      } else if (
+        input === "Q2_PT" ||
+        input.startsWith("part") ||
+        input === "2" ||
+        input === "parttime"
+      ) {
         session.answers.q2_availability = "part_time";
         if (minHours >= 30) {
           await failSession(from, session, "Insufficient weekly hours", env);
@@ -472,7 +525,12 @@ async function handleStep(
           await saveSession(from, session, env);
           await sendQuestion(from, "Q3", env);
         }
-      } else if (input === "Q2_LOW" || input.startsWith("less") || input === "3") {
+      } else if (
+        input === "Q2_LOW" ||
+        input.startsWith("less") ||
+        input === "3" ||
+        input === "low"
+      ) {
         session.answers.q2_availability = "low";
         await failSession(from, session, "Insufficient weekly hours", env);
       } else {
@@ -483,17 +541,33 @@ async function handleStep(
     }
 
     case "Q3": {
-      if (input === "Q3_NOW" || input.startsWith("imm") || input === "1") {
+      if (
+        input === "Q3_NOW" ||
+        input.startsWith("imm") ||
+        input === "1" ||
+        input === "now"
+      ) {
         session.answers.q3_start_date = "immediately";
         session.step = "Q4";
         await saveSession(from, session, env);
         await sendQuestion(from, "Q4", env);
-      } else if (input === "Q3_2W" || input.startsWith("1\u20132") || input.startsWith("1-2") || input === "2") {
+      } else if (
+        input === "Q3_2W" ||
+        input.startsWith("1\u20132") ||
+        input.startsWith("1-2") ||
+        input === "2" ||
+        input === "2weeks"
+      ) {
         session.answers.q3_start_date = "1_2_weeks";
         session.step = "Q4";
         await saveSession(from, session, env);
         await sendQuestion(from, "Q4", env);
-      } else if (input === "Q3_1M" || input.startsWith("1 month") || input === "3") {
+      } else if (
+        input === "Q3_1M" ||
+        input.startsWith("1 month") ||
+        input === "3" ||
+        input === "1month"
+      ) {
         session.answers.q3_start_date = "1_month_plus";
         session.step = "Q4";
         await saveSession(from, session, env);
@@ -553,7 +627,7 @@ async function processAndSend(
     if (!allowed) {
       await sendTwilioText(
         from,
-        "You\u2019re sending messages too quickly. Please wait a moment and try again.",
+        "You're sending messages too quickly. Please wait a moment and try again.",
         env
       );
       return;
@@ -563,12 +637,19 @@ async function processAndSend(
     const input = (buttonPayload || buttonText || rawBody).trim();
     const upper = input.toUpperCase();
 
+    // PING debug command — sends plain "pong" and logs the result
+    if (upper === "PING") {
+      console.log(`[PING] from=${from}`);
+      await sendTwilioText(from, "pong", env);
+      return;
+    }
+
     // RESTART is always honoured regardless of session state
     if (upper === "RESTART") {
       await safeKvDelete(env.BOT_KV, `session:${from}`);
       const session = createSession();
       await saveSession(from, session, env);
-      await sendTwilioText(from, "Session restarted. Here\u2019s Q1:", env);
+      await sendTwilioText(from, "Session restarted. Here's Q1:", env);
       await sendQuestion(from, "Q1", env);
       return;
     }
