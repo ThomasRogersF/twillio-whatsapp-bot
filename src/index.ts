@@ -65,7 +65,7 @@ const QUESTION_TEXT: Record<ScreeningStep, string> = {
   Q2: "*Q2/8* \uD83D\uDDD3\uFE0F\n\u00BFCu\u00E1ntas horas por semana puedes comprometerte de forma constante?\n1) \uD83D\uDCAA Tiempo completo (30+ hrs/sem)\n2) \uD83D\uDE42 Medio tiempo (15\u201329 hrs/sem)\n3) \uD83E\uDD72 Menos de 15 hrs/sem",
   Q3: "*Q3/8* \u23F1\uFE0F\n\u00BFCu\u00E1ndo podr\u00EDas empezar?\n1) \uD83D\uDE80 Inmediatamente\n2) \uD83D\uDCC6 En 1\u20132 semanas\n3) \uD83D\uDDD3\uFE0F En 1 mes o m\u00E1s",
   Q4: "*Q4/8* \uD83D\uDCBB\uD83C\uDFA7\n\u00BFTienes internet estable + un lugar tranquilo para ense\u00F1ar?\n1) \u2705 S\u00ED\n2) \u274C No",
-  Q5: "*Q5/8* \uD83D\uDCDA\u2728\n\u00BFEst\u00E1s de acuerdo en seguir el curr\u00EDculum y los SOPs del equipo?\n1) \u2705 S\u00ED\n2) \u274C No",
+  Q5: "*Q5/8* \uD83D\uDCDA\u2728\n\u00BFEst\u00E1s de acuerdo en seguir el curr\u00EDculum y los procesos del equipo?\n1) \u2705 S\u00ED\n2) \u274C No",
   Q6: "*Q6/8* \uD83C\uDDFA\uD83C\uDDF8\uD83D\uDDE3\uFE0F\n\u00BFCu\u00E1l es tu nivel de ingl\u00E9s?\n1) \u2705 Bueno\n2) \uD83D\uDE42 Me defiendo\n3) \u274C No s\u00E9 mucho",
   Q7: "*Q7/8* \uD83C\uDF82\n\u00BFCu\u00E1l es tu edad?\n(Escribe solo el n\u00FAmero, por ejemplo: 24)",
   Q8: "*Q8/8* \uD83D\uDC69\u200D\uD83C\uDFEB\n\u00BFA qu\u00E9 tipo de estudiantes has ense\u00F1ado?\n1) Ni\u00F1os \uD83D\uDC67\uD83E\uDDD2\n2) J\u00F3venes \uD83C\uDF93\n3) Adultos \uD83D\uDCBC\n4) Todos los anteriores \uD83C\uDF1F",
@@ -89,7 +89,7 @@ const FAIL_MESSAGES = {
   Q4: "\uD83D\uDCDB Gracias por tu respuesta.\nPara poder dar clases con calidad, necesitamos *internet estable* y un *espacio tranquilo*.\n\n\uD83D\uDE4F Te agradecemos tu tiempo.",
   Q5: "\uD83D\uDCDB Gracias por tu sinceridad.\nPara este rol es importante seguir nuestro sistema y procesos.\n\n\uD83D\uDE4F Te deseamos lo mejor y gracias por postularte.",
   Q6: "\uD83D\uDCDB \u00A1Gracias!\nPor ahora necesitamos al menos un nivel de ingl\u00E9s para comunicarnos en el equipo (aunque sea _\"me defiendo\"_).\n\n\uD83D\uDE4F Te agradecemos tu tiempo y tu inter\u00E9s en SpanishVIP.",
-  Q7: "\uD83D\uDCDB \u00A1Gracias!\nEn este momento estamos buscando candidatos *menores de 35 a\u00F1os* para este rol.\n\n\uD83D\uDE4F Te agradecemos tu tiempo y tu inter\u00E9s en SpanishVIP.",
+  Q7: "\uD83D\uDC9B Gracias por tu inter\u00E9s en SpanishVIP.\nHemos recibido tu solicitud y revisaremos tu informaci\u00F3n. Si avanzas a la siguiente etapa, nos pondremos en contacto contigo.\n\n\uD83D\uDE4F Gracias por tu tiempo.",
 };
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
